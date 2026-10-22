@@ -12,6 +12,9 @@ import org.jetbrains.annotations.Nullable;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Class for detecting server software and version and finding available NMS implementation(s).
+ */
 @Getter
 public class ServerVersionInfo {
 
@@ -23,6 +26,7 @@ public class ServerVersionInfo {
     @NotNull
     private final String minecraftVersion;
 
+    /** Name of the server software, either "Paper" or "Spigot" */
     @NotNull
     private final String serverName;
 
@@ -33,6 +37,10 @@ public class ServerVersionInfo {
     @NotNull
     @Setter
     private ImplementationProvider implementationProvider;
+
+    /** Name of the implementation package (such as v1_7_R4 or paper_1_20_5) */
+    @Nullable
+    private String implementationPackage;
 
     /**
      * Constructs new instance and detects server version info.
@@ -72,10 +80,11 @@ public class ServerVersionInfo {
             // Paper <1.20.5 or Spigot 1.x
             try {
                 // Does not actually support flat 1.19, but whatever, no one is using it anyway
+                implementationPackage = serverPackage;
                 return (ImplementationProvider) Class.forName("me.neznamy.tab.platforms.bukkit." + serverPackage + ".NMSImplementationProvider").getConstructor().newInstance();
             } catch (ReflectiveOperationException ignored) {
                 throw new IllegalStateException(String.format(
-                        "Your server version (%s - %s) is no longer supported.",
+                        "Your server version (%s - %s) is no longer supported. Please use an older version of TAB.",
                         minecraftVersion, serverPackage
                 ));
             }
@@ -86,6 +95,8 @@ public class ServerVersionInfo {
         spigotVersions.put(ProtocolVersion.V26_1, "v26_1");
         spigotVersions.put(ProtocolVersion.V26_1_1, "v26_1");
         spigotVersions.put(ProtocolVersion.V26_1_2, "v26_1");
+        spigotVersions.put(ProtocolVersion.V26_2, "v26_2");
+        spigotVersions.put(ProtocolVersion.V26_3, "v26_2");
 
         Map<ProtocolVersion, String> paperVersions = new LinkedHashMap<>();
         paperVersions.put(ProtocolVersion.V1_20_5, "paper_1_20_5");
@@ -105,21 +116,24 @@ public class ServerVersionInfo {
         paperVersions.put(ProtocolVersion.V26_1, "paper_1_21_11");  // v26_1 works too
         paperVersions.put(ProtocolVersion.V26_1_1, "paper_1_21_11");  // v26_1 works too
         paperVersions.put(ProtocolVersion.V26_1_2, "paper_1_21_11");  // v26_1 works too
+        paperVersions.put(ProtocolVersion.V26_2, "paper_26_2");  // v26_2 works too
+        paperVersions.put(ProtocolVersion.V26_3, "paper_26_2");
 
         if (serverVersion == ProtocolVersion.UNKNOWN) {
             throw new IllegalStateException(String.format(
-                    "Unknown server version (%s), can not find implementation.",
-                    minecraftVersion
+                    "Unknown server version (%s %s), cannot find implementation.",
+                    serverName, minecraftVersion
             ));
         }
         String implementation = (serverName.equals("Paper") ? paperVersions : spigotVersions).get(serverVersion);
         if (implementation == null) {
             throw new IllegalStateException(String.format(
-                    "Your server version (%s %s) is no longer supported.",
+                    "Your server version (%s %s) is no longer supported. Please use an older version of TAB.",
                     serverName, minecraftVersion
             ));
         }
         try {
+            implementationPackage = implementation;
             return (ImplementationProvider) Class.forName("me.neznamy.tab.platforms.bukkit." + implementation + ".NMSImplementationProvider").getConstructor().newInstance();
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException(String.format(

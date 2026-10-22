@@ -11,7 +11,7 @@ import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.data.Server;
 import me.neznamy.tab.shared.features.ToggleManager;
 import me.neznamy.tab.shared.features.scoreboard.ScoreboardConfiguration.ScoreboardDefinition;
-import me.neznamy.tab.shared.features.scoreboard.lines.ScoreboardLine;
+import me.neznamy.tab.shared.features.scoreboard.lines.ScoreboardLineHolder;
 import me.neznamy.tab.shared.features.types.*;
 import me.neznamy.tab.shared.platform.Scoreboard;
 import me.neznamy.tab.shared.platform.TabPlayer;
@@ -34,6 +34,7 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     public static final String OBJECTIVE_NAME = "TAB-Scoreboard";
 
     private final StringToComponentCache cache = new StringToComponentCache("Scoreboard", 1000);
+    private final StringToComponentCache numberFormatCache = new StringToComponentCache("Scoreboard NumberFormat", 1000);
 
     private final ThreadExecutor customThread = new ThreadExecutor("TAB Scoreboard Thread");
 
@@ -70,11 +71,16 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     public void load() {
         TAB.getInstance().getPlatform().registerCustomCommand(configuration.getToggleCommand().replaceFirst("/", ""), (p, args) -> {
             if (!isActive()) return;
-            if (p.hasPermission(TabConstants.Permission.COMMAND_SCOREBOARD_TOGGLE)) {
-                toggleScoreboard(p, true);
+            String[] forwardedArgs;
+            if (args.length == 0) {
+                forwardedArgs = new String[]{"scoreboard", "toggle"};
             } else {
-                p.sendMessage(TAB.getInstance().getConfiguration().getMessages().getNoPermission());
+                forwardedArgs = new String[args.length + 2];
+                forwardedArgs[0] = "scoreboard";
+                forwardedArgs[1] = "toggle";
+                System.arraycopy(args, 0, forwardedArgs, 2, args.length);
             }
+            TAB.getInstance().getCommand().execute(p, forwardedArgs);
         });
         for (Entry<String, ScoreboardDefinition> entry : configuration.getScoreboards().entrySet()) {
             String scoreboardName = entry.getKey();
@@ -109,6 +115,7 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
         if (configuration.getJoinDelay() > 0) {
             connectedPlayer.scoreboardData.joinDelayed = true;
             customThread.executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+                if (!connectedPlayer.isOnline()) return; // Player disconnected before the delay ran out
                 setScoreboardVisible(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
                 connectedPlayer.scoreboardData.joinDelayed = false;
             }, getFeatureName(), TabConstants.CpuUsageCategory.PLAYER_JOIN), configuration.getJoinDelay());
@@ -166,10 +173,48 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     }
 
     @Override
-    public void onDisplayObjective(@NotNull TabPlayer receiver, int slot, @NotNull String objective) {
-        if (slot == Scoreboard.DisplaySlot.SIDEBAR.ordinal() && !objective.equals(OBJECTIVE_NAME)) {
+    public void onDisplayObjective(@NotNull TabPlayer receiver, int slot, @Nullable String objective) {
+        if (slot != Scoreboard.DisplaySlot.SIDEBAR.ordinal()) {
+            return;
+        }
+        if (objective == null) {
+            if (receiver.scoreboardData.otherPluginScoreboard != null) {
+                receiver.scoreboardData.otherPluginScoreboard = null;
+                if (receiver.scoreboardData.activeScoreboard != null) {
+                    receiver.getScoreboard().setDisplaySlot(OBJECTIVE_NAME, Scoreboard.DisplaySlot.SIDEBAR);
+                }
+            }
+        } else if (!objective.equals(OBJECTIVE_NAME)) {
             TAB.getInstance().debug("Player " + receiver.getName() + " received scoreboard called " + objective + ", disabling TAB's scoreboard slotting.");
             receiver.scoreboardData.otherPluginScoreboard = objective;
+        }
+    }
+
+    /**
+     * Handles a sidebar display sent through VelocityScoreboardAPI.
+     *
+     * <p>VelocityScoreboardAPI gives proxy objectives priority over downstream
+     * objectives. Its display event is therefore the last opportunity to remove
+     * TAB's proxy objective before the downstream display packet is cancelled.
+     * This method is intentionally called synchronously by the Velocity hook.</p>
+     *
+     * @param receiver
+     *          player receiving the packet
+     * @param slot
+     *          display slot
+     * @param objective
+     *          objective assigned to the slot, or {@code null}
+     */
+    public void onVelocityScoreboardDisplay(@NotNull TabPlayer receiver, int slot, @Nullable String objective) {
+        if (slot != Scoreboard.DisplaySlot.SIDEBAR.ordinal()) {
+            return;
+        }
+        if (objective == null) {
+            restoreAfterVelocityScoreboard(receiver);
+        } else if (!objective.equals(OBJECTIVE_NAME)) {
+            TAB.getInstance().debug("Player " + receiver.getName() + " received scoreboard called " + objective + ", releasing TAB's proxy scoreboard.");
+            receiver.scoreboardData.otherPluginScoreboard = objective;
+            unregisterScoreboard(receiver);
         }
     }
 
@@ -182,6 +227,30 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
                 receiver.getScoreboard().setDisplaySlot(OBJECTIVE_NAME, Scoreboard.DisplaySlot.SIDEBAR);
             }
         }
+    }
+
+    /**
+     * Handles removal of a downstream objective reported by VelocityScoreboardAPI.
+     * This is synchronous for the same reason as {@link #onVelocityScoreboardDisplay(TabPlayer, int, String)}.
+     *
+     * @param receiver
+     *          player receiving the packet
+     * @param objective
+     *          removed objective
+     */
+    public void onVelocityScoreboardUnregister(@NotNull TabPlayer receiver, @NotNull String objective) {
+        if (objective.equals(receiver.scoreboardData.otherPluginScoreboard)) {
+            restoreAfterVelocityScoreboard(receiver);
+        }
+    }
+
+    private void restoreAfterVelocityScoreboard(@NotNull TabPlayer receiver) {
+        if (receiver.scoreboardData.otherPluginScoreboard == null) {
+            return;
+        }
+        TAB.getInstance().debug("Player " + receiver.getName() + " no longer has another scoreboard, restoring TAB's proxy scoreboard.");
+        receiver.scoreboardData.otherPluginScoreboard = null;
+        sendHighestScoreboard(receiver);
     }
 
     @Override
@@ -214,8 +283,8 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
                 put("title", player.scoreboardData.titleProperty.get());
                 List<String> lines = new ArrayList<>();
                 for (Line line : player.scoreboardData.activeScoreboard.getLines()) {
-                    lines.add(player.scoreboardData.lineProperties.get((ScoreboardLine) line).get() + " || " +
-                            player.scoreboardData.numberFormatProperties.get((ScoreboardLine) line).get());
+                    lines.add(player.scoreboardData.lineProperties.get((ScoreboardLineHolder) line).textProperty.get() + " || " +
+                            player.scoreboardData.lineProperties.get((ScoreboardLineHolder) line).numberFormatProperty.get());
                 }
                 put("lines", lines);
             }});
@@ -233,7 +302,7 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     @NotNull
     public me.neznamy.tab.api.scoreboard.Scoreboard createScoreboard(@NonNull String name, @NonNull String title, @NonNull List<String> lines) {
         ensureActive();
-        ScoreboardImpl sb = new ScoreboardImpl(this, name, new ScoreboardDefinition(null, title, lines), true, true);
+        ScoreboardImpl sb = new ScoreboardImpl(this, name, new ScoreboardDefinition(null, title, lines), true);
         registeredScoreboards.put(name, sb);
         return sb;
     }

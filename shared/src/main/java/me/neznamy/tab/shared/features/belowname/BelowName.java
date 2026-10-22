@@ -1,6 +1,8 @@
 package me.neznamy.tab.shared.features.belowname;
 
 import lombok.Getter;
+import lombok.NonNull;
+import me.neznamy.tab.api.belowname.BelowNameManager;
 import me.neznamy.tab.shared.Property;
 import me.neznamy.tab.shared.ProtocolVersion;
 import me.neznamy.tab.shared.TAB;
@@ -27,8 +29,8 @@ import java.util.stream.Collectors;
  * Feature handler for scoreboard objective with BELOW_NAME display slot (under name tag).
  */
 @Getter
-public class BelowName extends RefreshableFeature implements JoinListener, QuitListener, Loadable,
-        WorldSwitchListener, ServerSwitchListener, CustomThreaded, ProxyFeature, VanishListener, Dumpable {
+public class BelowName extends RefreshableFeature implements JoinListener, QuitListener, Loadable, UnLoadable,
+        WorldSwitchListener, ServerSwitchListener, CustomThreaded, ProxyFeature, VanishListener, Dumpable, BelowNameManager {
 
     /** Objective name used by this feature */
     public static final String OBJECTIVE_NAME = "TAB-BelowName";
@@ -68,8 +70,9 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         onlinePlayers = new OnlinePlayers(TAB.getInstance().getOnlinePlayers());
         Map<TabPlayer, Integer> values = new HashMap<>();
         for (TabPlayer loaded : onlinePlayers.getPlayers()) {
+            loaded.setBelowNameDistance(configuration.getViewDistance());
             loadProperties(loaded);
-            if (disableChecker.isDisableConditionMet(loaded)) {
+            if (configuredDisabled(loaded)) {
                 loaded.belowNameData.disabled.set(true);
             } else {
                 register(loaded);
@@ -84,6 +87,13 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         }
     }
 
+    @Override
+    public void unload() {
+        for (TabPlayer all : onlinePlayers.getPlayers()) {
+            all.setBelowNameDistance(10); // Reset to default distance
+        }
+    }
+
     private void loadProperties(@NotNull TabPlayer player) {
         player.belowNameData.value = new Property(this, player, configuration.getValue());
         player.belowNameData.fancyValue = new Property(this, player, configuration.getFancyValue());
@@ -94,8 +104,9 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     @Override
     public void onJoin(@NotNull TabPlayer connectedPlayer) {
         onlinePlayers.addPlayer(connectedPlayer);
+        connectedPlayer.setBelowNameDistance(configuration.getViewDistance());
         loadProperties(connectedPlayer);
-        if (disableChecker.isDisableConditionMet(connectedPlayer)) {
+        if (configuredDisabled(connectedPlayer)) {
             connectedPlayer.belowNameData.disabled.set(true);
         } else {
             register(connectedPlayer);
@@ -134,6 +145,24 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
      *          Whether the feature is disabled now or not
      */
     public void onDisableConditionChange(TabPlayer p, boolean disabledNow) {
+        Boolean forced = p.belowNameData.forcedEnabled;
+        if (forced != null) {
+            p.belowNameData.disabled.set(!forced);
+            return;
+        }
+        updateVisibility(p, disabledNow);
+    }
+
+    private boolean configuredDisabled(@NotNull TabPlayer p) {
+        return disableChecker.isDisableConditionMet(p);
+    }
+
+    private void applyDisabledState(@NotNull TabPlayer p, boolean disabled) {
+        if (p.belowNameData.disabled.getAndSet(disabled) == disabled) return;
+        updateVisibility(p, disabled);
+    }
+
+    private void updateVisibility(@NotNull TabPlayer p, boolean disabledNow) {
         if (disabledNow) {
             p.getScoreboard().unregisterObjective(OBJECTIVE_NAME);
         } else {
@@ -211,6 +240,15 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         player.getScoreboard().setDisplaySlot(OBJECTIVE_NAME, Scoreboard.DisplaySlot.BELOW_NAME);
     }
 
+    private void updateObjective(@NotNull TabPlayer player) {
+        player.getScoreboard().updateObjective(
+                OBJECTIVE_NAME,
+                cache.get(player.belowNameData.title.updateAndGet()),
+                Scoreboard.HealthDisplay.INTEGER,
+                cache.get(player.belowNameData.defaultNumberFormat.updateAndGet())
+        );
+    }
+
     /**
      * Updates score of specified entry to player.
      *
@@ -227,7 +265,7 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         if (viewer.belowNameData.disabled.get()) return;
         if (viewer.server != scoreHolder.server || viewer.world != scoreHolder.world) return; // Viewer definitely cannot see this player in game
         if (viewer.canSee(scoreHolder)) {
-            if (fancyValue.isEmpty() && viewer.getVersionId() > ProtocolVersion.V26_1_2.getNetworkId()) { // TODO change this to use V26_2 once added
+            if (fancyValue.isEmpty() && viewer.getVersionId() >= ProtocolVersion.V26_2.getNetworkId()) {
                 viewer.getScoreboard().removeScore(OBJECTIVE_NAME, scoreHolder.getNickname());
             } else {
                 viewer.getScoreboard().setScore(
@@ -252,9 +290,10 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     }
 
     private void updatePlayer(@NotNull TabPlayer player) {
+        int value = getValue(player);
         for (TabPlayer all : onlinePlayers.getPlayers()) {
-            setScore(player, all, getValue(all), all.belowNameData.fancyValue.getFormat(player));
-            if (all != player) setScore(all, player, getValue(player), player.belowNameData.fancyValue.getFormat(all));
+            if (all != player) setScore(player, all, getValue(all), all.belowNameData.fancyValue.getFormat(player));
+            setScore(all, player, value, player.belowNameData.fancyValue.getFormat(all));
         }
     }
 
@@ -275,6 +314,7 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
 
     @Override
     public void onQuit(@NotNull TabPlayer disconnectedPlayer) {
+        disconnectedPlayer.setBelowNameDistance(10); // Reset to default distance
         onlinePlayers.removePlayer(disconnectedPlayer);
     }
 
@@ -287,9 +327,89 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     @Override
     public void onVanishStatusChange(@NotNull TabPlayer player) {
         if (player.isVanished()) return;
+        int value = getValue(player);
         for (TabPlayer viewer : onlinePlayers.getPlayers()) {
-            setScore(viewer, player, getValue(player), player.belowNameData.fancyValue.getFormat(viewer));
+            setScore(viewer, player, value, player.belowNameData.fancyValue.getFormat(viewer));
         }
+    }
+
+    // ------------------
+    // API Implementation
+    // ------------------
+
+    @Override
+    public void setEnabled(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable Boolean enabled) {
+        ensureActive();
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            TabPlayer p = (TabPlayer) player;
+            p.ensureLoaded();
+            p.belowNameData.forcedEnabled = enabled;
+            applyDisabledState(p, enabled == null ? configuredDisabled(p) : !enabled);
+        }, getFeatureName(), "Processing API call (setEnabled)"));
+    }
+
+    @Override
+    @Nullable
+    public Boolean getCustomEnabled(@NonNull me.neznamy.tab.api.TabPlayer player) {
+        ensureActive();
+        return ((TabPlayer) player).belowNameData.forcedEnabled;
+    }
+
+    @Override
+    public void setValue(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable String value) {
+        ensureActive();
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            TabPlayer p = (TabPlayer) player;
+            p.ensureLoaded();
+            if (Objects.equals(p.belowNameData.value.getTemporaryValue(), value)) return;
+            p.belowNameData.value.setTemporaryValue(value);
+            refresh(p, true);
+        }, getFeatureName(), "Processing API call (setValue)"));
+    }
+
+    @Override
+    @Nullable
+    public String getCustomValue(@NonNull me.neznamy.tab.api.TabPlayer player) {
+        ensureActive();
+        return ((TabPlayer) player).belowNameData.value.getTemporaryValue();
+    }
+
+    @Override
+    public void setFancyValue(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable String fancyValue) {
+        ensureActive();
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            TabPlayer p = (TabPlayer) player;
+            p.ensureLoaded();
+            if (Objects.equals(p.belowNameData.fancyValue.getTemporaryValue(), fancyValue)) return;
+            p.belowNameData.fancyValue.setTemporaryValue(fancyValue);
+            refresh(p, true);
+        }, getFeatureName(), "Processing API call (setFancyValue)"));
+    }
+
+    @Override
+    @Nullable
+    public String getCustomFancyValue(@NonNull me.neznamy.tab.api.TabPlayer player) {
+        ensureActive();
+        return ((TabPlayer) player).belowNameData.fancyValue.getTemporaryValue();
+    }
+
+    @Override
+    public void setTitle(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable String title) {
+        ensureActive();
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            TabPlayer p = (TabPlayer) player;
+            p.ensureLoaded();
+            if (Objects.equals(p.belowNameData.title.getTemporaryValue(), title)) return;
+            p.belowNameData.title.setTemporaryValue(title);
+            if (!p.belowNameData.disabled.get()) updateObjective(p);
+        }, getFeatureName(), "Processing API call (setTitle)"));
+    }
+
+    @Override
+    @Nullable
+    public String getCustomTitle(@NonNull me.neznamy.tab.api.TabPlayer player) {
+        ensureActive();
+        return ((TabPlayer) player).belowNameData.title.getTemporaryValue();
     }
 
     @Override

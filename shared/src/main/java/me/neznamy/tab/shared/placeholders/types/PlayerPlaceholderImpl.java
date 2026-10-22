@@ -7,6 +7,7 @@ import me.neznamy.tab.shared.TabConstants;
 import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.features.types.CustomThreaded;
 import me.neznamy.tab.shared.features.types.RefreshableFeature;
+import me.neznamy.tab.shared.placeholders.PlaceholderIdentifier;
 import me.neznamy.tab.shared.platform.TabPlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,7 +23,8 @@ import java.util.function.Function;
 public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlaceholder {
 
     /** Placeholder function returning fresh output on request */
-    @NonNull private final Function<me.neznamy.tab.api.TabPlayer, String> function;
+    @NonNull
+    private final Function<me.neznamy.tab.api.TabPlayer, String> function;
 
     /**
      * Constructs new instance with given parameters
@@ -37,7 +39,7 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
      */
     public PlayerPlaceholderImpl(@NonNull String identifier, int refresh, @NonNull Function<me.neznamy.tab.api.TabPlayer, String> function) {
         super(identifier, refresh);
-        if (identifier.startsWith("%rel_")) throw new IllegalArgumentException("\"rel_\" is reserved for relational placeholder identifiers");
+        if (PlaceholderIdentifier.isRelational(identifier)) throw new IllegalArgumentException("\"rel_\" is reserved for relational placeholder identifiers");
         this.function = function;
     }
 
@@ -47,10 +49,10 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
     }
 
     @Override
-    public void updateValue(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable String value) {
-        if (hasValueChanged((TabPlayer) player, value, true)) {
+    public void updateValue(@NonNull me.neznamy.tab.api.TabPlayer player, @Nullable String returnedValue) {
+        if (hasValueChanged((TabPlayer) player, returnedValue, true)) {
             if (!player.isLoaded()) return; // Updated on join
-            for (RefreshableFeature r : getUsedByFeatures()) {
+            for (RefreshableFeature r : reference.getUsedByFeatures()) {
                 TimedCaughtTask task = new TimedCaughtTask(TAB.getInstance().getCpu(), () -> r.refresh((TabPlayer) player, false),
                         r.getFeatureName(), r.getRefreshDisplayName());
                 if (r instanceof CustomThreaded) {
@@ -76,7 +78,7 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
         Set<RefreshableFeature> features = new HashSet<>();
         for (Map.Entry<PlayerPlaceholderImpl, String> entry : values.entrySet()) {
             if (entry.getKey().hasValueChanged(player, entry.getValue(), true)) {
-                features.addAll(entry.getKey().getUsedByFeatures());
+                features.addAll(entry.getKey().getReference().getUsedByFeatures());
             }
         }
         if (!player.isLoaded()) return;
@@ -96,20 +98,21 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
      *
      * @param   p
      *          Player to update value for
-     * @param   value
-     *          New value
+     * @param   returnedValue
+     *          New value returned by the placeholder function
      * @param   updateParents
      *          Whether parents should be updated or not
      * @return  {@code true} if value changed, {@code false} if not
      */
-    public boolean hasValueChanged(@NotNull TabPlayer p, @Nullable String value, boolean updateParents) {
-        if (value == null) return false; //bridge placeholders, they are updated using updateValue method
-        if (ERROR_VALUE.equals(value)) return false;
-        String newValue = replacements.findReplacement(setPlaceholders(value, p));
-        String lastValue = p.lastPlaceholderValues.put(this, newValue);
-        if (!newValue.equals(lastValue)) {
+    public boolean hasValueChanged(@NotNull TabPlayer p, @Nullable String returnedValue, boolean updateParents) {
+        if (returnedValue == null || returnedValue.equals(ERROR_VALUE)) return false;
+        p.lastPlaceholderReturnedValues.put(this, returnedValue);
+        String newEvaluatedValue = evaluate(returnedValue, p);
+        String lastEvaluatedValue = p.lastPlaceholderEvaluatedValues.put(this, newEvaluatedValue);
+
+        if (!newEvaluatedValue.equals(lastEvaluatedValue)) {
             if (updateParents) updateParents(p);
-            p.expansionData.setPlaceholderValue(identifier, newValue);
+            p.expansionData.setPlaceholderValue(identifier, newEvaluatedValue);
             return true;
         }
         return false;
@@ -117,25 +120,40 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
 
     @Override
     public void updateFromNested(@NonNull TabPlayer player) {
-        hasValueChanged(player, request(player), true);
+        updateValue(player, request(player));
     }
 
     @NotNull
     public synchronized String getLastValue(@Nullable TabPlayer p) {
         if (p == null) return identifier;
-        String value = p.lastPlaceholderValues.get(this);
+        String value = p.lastPlaceholderEvaluatedValues.get(this);
         if (value != null) return value;
 
         // Value not present, initialize
-        p.lastPlaceholderValues.put(this, replacements.findReplacement(identifier));
+        p.lastPlaceholderReturnedValues.put(this, identifier);
+        p.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
         hasValueChanged(p, request(p), false);
-        return p.lastPlaceholderValues.get(this);
+        return p.lastPlaceholderEvaluatedValues.get(this);
+    }
+
+    @Override
+    @NotNull
+    public synchronized String getLastReturnedValue(@Nullable TabPlayer player) {
+        if (player == null) return identifier;
+        String value = player.lastPlaceholderReturnedValues.get(this);
+        if (value != null) return value;
+
+        // Value not present, initialize
+        player.lastPlaceholderReturnedValues.put(this, identifier);
+        player.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
+        hasValueChanged(player, request(player), false);
+        return player.lastPlaceholderReturnedValues.get(this);
     }
 
     @Override
     @NotNull
     public String getLastValueSafe(@NotNull TabPlayer player) {
-        return player.lastPlaceholderValues.getOrDefault(this, identifier);
+        return player.lastPlaceholderEvaluatedValues.getOrDefault(this, identifier);
     }
 
     /**

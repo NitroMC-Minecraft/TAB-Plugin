@@ -143,6 +143,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
     public void onQuit(@NotNull TabPlayer disconnectedPlayer) {
         onlinePlayers.removePlayer(disconnectedPlayer);
         unregisterTeam(disconnectedPlayer);
+        disconnectedPlayer.teamData.clearRegisteredTeams();
     }
 
     @Override
@@ -205,6 +206,9 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
             unregisterTeam(p);
         } else {
             registerTeam(p);
+        }
+        if (proxy != null) {
+            proxyHandler.sendProxyMessage(p);
         }
     }
 
@@ -340,7 +344,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
                     p.getNametag() == null ? "NULL" : "\"" + p.getNametag().getPrefix() + "\"",
                     p.getNametag() == null ? "NULL" : lastColorCache.get(p.getNametag().getPrefix()).getLastStyle().toEnumChatFormat().name(),
                     p.getNametag() == null ? "NULL" : "\"" + p.getNametag().getSuffix() + "\"",
-                    "N/A"
+                    p.getNametag() == null ? "NULL" : String.valueOf(p.getNametag().isDisabled())
             )).collect(Collectors.toList()));
         }
         map.put("current values for all players (without applying relational placeholders)", DumpUtils.tableToLines(header, players));

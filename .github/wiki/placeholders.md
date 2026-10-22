@@ -5,6 +5,7 @@
   * [Backend only](#backend-only)
   * [Proxy only](#proxy-only)
 * [PlaceholderAPI](#placeholderapi)
+* [MiniPlaceholders](#miniplaceholders)
 * [Relational placeholders](#relational-placeholders)
   * [About](#about-1)
   * [Usage](#usage)
@@ -107,7 +108,9 @@ Full list of placeholders (general + feature specific):
 | Identifier                        | Description                                                                                                                                                                                                                                                                     |
 |-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `%tab_replace_<placeholder>%`     | Applies [Placeholder output replacements](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Placeholder-output-replacements) to a PlaceholderAPI placeholder (for example `%tab_replace_essentials_vanished%`)                                                                 |
-| `%tab_placeholder_<placeholder>%` | returns value of tab's internal placeholder (such as `%tab_placeholder_animation:name%` for `%animation:name%`) (this also applies [Placeholder output replacements](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Placeholder-output-replacements) to them if configured) |
+| `%tab_placeholder_<placeholder>%` | Returns value of tab's internal placeholder (this also applies [Placeholder output replacements](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Placeholder-output-replacements) to them if configured). <br />Example: `%tab_placeholder_animation:name%` for `%animation:name%` |
+| `%rel_tab_replace_<rel_placeholder>%`     | Applies [Placeholder output replacements](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Placeholder-output-replacements) to a **relationnal** PlaceholderAPI placeholder |
+| `%rel_tab_placeholder_<rel_placeholder>%` | Returns value of tab's internal **relational** placeholder (this also applies [Placeholder output replacements](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Placeholder-output-replacements) to them if configured). It may look strange that the `rel` is twice in there, but there's no other way. The first one tells PlaceholderAPI that this is a relational placeholder, the second one is part of the TAB's identifier, which also uses it to mark the placeholder as relational. <br />Example: `%rel_tab_placeholder_rel_condition:name%` for `%rel_condition:name%` |
 
 **BossBar**:
 
@@ -143,6 +146,12 @@ Full list of placeholders (general + feature specific):
 | `%tab_customtabname_raw%` | Player's current raw customtabname with placeholder identifiers. |
 | `%tab_tabsuffix_raw%`     | Player's current raw tabsuffix with placeholder identifiers.     |
 
+# MiniPlaceholders
+On **Velocity**, TAB integrates with [MiniPlaceholders](https://github.com/MiniPlaceholders/MiniPlaceholders) when the plugin is installed. TAB automatically detects and resolves MiniPlaceholders placeholders in config text, including global, per-player, and relational ones. Placeholders use angle brackets, with the expansion and name separated by an underscore (for example `<luckperms_prefix>`), and arguments added after a colon (for example `<luckperms_meta:key>`). See the [MiniPlaceholders placeholder list](https://miniplaceholders.github.io/docs/user-guide/Placeholders) for all available placeholders. TAB also registers its own expansion, offering placeholders such as `<tab_tabprefix>` and `<tab_placeholder:name>`. The `%placeholder%` syntax remains reserved for [PlaceholderAPI](https://github.com/PlaceholderAPI/PlaceholderAPI) (via TAB Bridge on Velocity).
+
+> [!WARNING]
+> TAB's gradient syntax (`<#RRGGBB>Text</#RRGGBB>`) is a compatibility layer that TAB rewrites before parsing, it is more fragile than native [MiniMessage](https://docs.advntr.dev/minimessage/format.html) gradients (`<gradient:#RRGGBB:#RRGGBB>Text</gradient>`). On **Velocity**, this is especially problematic because [MiniPlaceholders](https://github.com/MiniPlaceholders/MiniPlaceholders) parses MiniMessage *before* TAB can rewrite its gradient syntax. For example, placeholder output like `<#E0B11E>MyServer</#FF0000>` is interpreted by MiniPlaceholders as a hex color tag (`<#E0B11E>`), but `</#FF0000>` is not recognized as a gradient closing tag, so the formatting breaks. Prefer native MiniMessage syntax in placeholder output (e.g. `<gradient:#E0B11E:#FF0000>MyServer</gradient>`). See [How to use Minecraft components - MiniMessage](https://github.com/NEZNAMY/TAB/wiki/How-to-use-Minecraft-components#minimessage) for more information.
+
 # Relational placeholders
 ## About
 Unlike classic placeholders which take either 0
@@ -168,7 +177,7 @@ To properly distinguish viewer/target (if needed), your relational placeholder e
 
 # Refreshing
 ## Refresh intervals
-TAB is refreshing placeholders in intervals. For internal placeholders it's using values I found the most optimal and set directly in the plugin. Refresh intervals for PlaceholderAPI placeholders can be [configured](https://github.com/NEZNAMY/TAB/wiki/Optimizing-the-plugin#2---placeholder-refresh-intervals).
+TAB is refreshing placeholders in intervals. For internal placeholders it's using values I found the most optimal and set directly in the plugin. Refresh intervals for PlaceholderAPI placeholders can be [configured](https://github.com/NEZNAMY/TAB/wiki/Optimizing-the-plugin#2---all-platforms-placeholder-refresh-intervals).
 
 ## Sync refreshing
 By default, all placeholders are refreshed asynchronously,

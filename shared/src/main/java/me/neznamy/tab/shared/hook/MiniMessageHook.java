@@ -1,9 +1,15 @@
 package me.neznamy.tab.shared.hook;
 
+import lombok.Getter;
 import me.neznamy.tab.shared.chat.component.TabComponent;
+import me.neznamy.tab.shared.chat.component.object.TabObjectComponent;
 import me.neznamy.tab.shared.chat.hook.AdventureHook;
 import me.neznamy.tab.shared.TAB;
+import me.neznamy.tab.shared.util.ReflectionUtils;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.Tag;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -12,17 +18,38 @@ import org.jetbrains.annotations.Nullable;
  */
 public class MiniMessageHook {
 
+    private static final boolean OBJECT_COMPONENTS_AVAILABLE = ReflectionUtils.classExists("net.kyori.adventure.text.object.ObjectContents");
+
     /** Minimessage deserializer with disabled component post-processing */
     @Nullable
-    private static final MiniMessage mm = createMiniMessage();
+    @Getter
+    private static final MiniMessage miniMessage = createMiniMessage();
 
     @Nullable
     private static MiniMessage createMiniMessage() {
         try {
-            return MiniMessage.miniMessage();
+            return MiniMessage.builder()
+                    .editTags(builder -> builder.resolvers(headTextureTag(), mineskinTag()))
+                    .build();
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    @NotNull
+    private static TagResolver headTextureTag() {
+        if (OBJECT_COMPONENTS_AVAILABLE) {
+            return MiniMessageObjectHook.headTextureTag();
+        }
+        return MiniMessageSafeAccessHack.fallbackHeadTextureTag();
+    }
+
+    @NotNull
+    private static TagResolver mineskinTag() {
+        if (OBJECT_COMPONENTS_AVAILABLE) {
+            return MiniMessageObjectHook.mineskinTag();
+        }
+        return MiniMessageSafeAccessHack.fallbackMineskinTag();
     }
 
     /**
@@ -31,7 +58,7 @@ public class MiniMessageHook {
      * @return  {@code true} if MiniMessage is available on the server, {@code false} if not
      */
     public static boolean isAvailable() {
-        return mm != null && TAB.getInstance().getConfiguration().getConfig().getComponents().isMinimessageSupport();
+        return miniMessage != null && TAB.getInstance().getConfiguration().getConfig().getComponents().isMinimessageSupport();
     }
 
     /**
@@ -44,12 +71,36 @@ public class MiniMessageHook {
      */
     @Nullable
     public static TabComponent parseText(@NotNull String text) {
-        if (mm == null) return null;
+        if (miniMessage == null) return null;
         try {
-            return AdventureHook.convert(mm.deserialize(text));
+            return AdventureHook.convert(miniMessage.deserialize(text));
         } catch (Throwable t) {
             TAB.getInstance().getErrorManager().printError("Failed to convert \"" + text + "\" into a MiniMessage component", t);
             return null;
+        }
+    }
+
+    /**
+     * Class loader hack to avoid class initializer error when using static methods in interfaces
+     * due to missing object components on <1.21.9.
+     * No, try/catch does not solve this.
+     */
+    private static class MiniMessageSafeAccessHack {
+
+        @NotNull
+        private static TagResolver fallbackHeadTextureTag() {
+            return TagResolver.resolver("head_texture", (args, context) -> {
+                args.popOr("Expected texture url"); // Consume the argument to keep the same tag signature
+                return Tag.selfClosingInserting(Component.text(TabObjectComponent.ERROR_MESSAGE));
+            });
+        }
+
+        @NotNull
+        private static TagResolver fallbackMineskinTag() {
+            return TagResolver.resolver("mineskin", (args, context) -> {
+                args.popOr("Expected skin uuid"); // Consume the argument to keep the same tag signature
+                return Tag.selfClosingInserting(Component.text(TabObjectComponent.ERROR_MESSAGE));
+            });
         }
     }
 }

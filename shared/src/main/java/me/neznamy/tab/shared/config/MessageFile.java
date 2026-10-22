@@ -75,14 +75,16 @@ public class MessageFile extends YamlConfigurationFile {
     // ------------------
 
     private final List<String> nameTagHelpMenu = getStringList("nametag.help-menu", Arrays.asList(
-            "/tab nametag <show/hide/toggle> [player] [-s] - Toggles nametag of specified player",
-            "/tab nametag <showview/hideview/toggleview> [player] [viewer] [-s] - Toggles nametag VIEW of specified player on other player(s)"
+            "/tab nametag <show/opaque/hide/toggle> [player] [viewer] [-s] - Toggles nametag of specified player",
+            "/tab nametag <showview/opaqueview/hideview/toggleview> [viewer] [-s] - Toggles nametag VIEW of specified player"
     ));
     private final String nameTagFeatureNotEnabled = getString("nametag.feature-not-enabled", "&cThis command requires nametag feature to be enabled.");
     private final String nameTagViewHidden = getString("nametag.view-hidden", "&aNametags of all players were hidden to you");
     private final String nameTagViewShown = getString("nametag.view-shown", "&aNametags of all players were shown to you");
     private final String nameTagTargetHidden = getString("nametag.player-hidden", "&aYour nametag was hidden");
     private final String nameTagTargetShown = getString("nametag.player-shown", "&aYour nametag was shown");
+    private final String nameTagOpaqueViewShown = getString("nametag.opaque-view-enabled", "&aYou will no longer see nametags of players behind walls");
+    private final String nameTagOpaqueTargetShown = getString("nametag.opaque-player-enabled", "&aYour nametag will no longer be visible through walls");
     private final String nameTagNoArgFromConsole = getString("nametag.no-arg-from-console", "&cYou need to specify player if running this command from the console");
 
     public MessageFile() throws IOException {

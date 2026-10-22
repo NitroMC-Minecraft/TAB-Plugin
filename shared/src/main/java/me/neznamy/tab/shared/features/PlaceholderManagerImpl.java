@@ -10,6 +10,7 @@ import me.neznamy.tab.shared.TabConstants.CpuUsageCategory;
 import me.neznamy.tab.shared.cpu.CpuManager;
 import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.features.types.*;
+import me.neznamy.tab.shared.placeholders.PlaceholderIdentifier;
 import me.neznamy.tab.shared.placeholders.PlaceholderReference;
 import me.neznamy.tab.shared.placeholders.PlaceholderRefreshConfiguration;
 import me.neznamy.tab.shared.placeholders.PlaceholderRefreshTask;
@@ -151,7 +152,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
                     if (!target.isOnline()) continue; // Player disconnected in the meantime while refreshing in another thread
                     if (placeholder.hasValueChanged(viewer, target, targetResult.getValue())) {
                         placeholder.updateParents(target);
-                        for (RefreshableFeature f : placeholder.getUsedByFeatures()) {
+                        for (RefreshableFeature f : placeholder.getReference().getUsedByFeatures()) {
                             update.computeIfAbsent(f, c -> new HashSet<>()).add(target);
                         }
                     }
@@ -171,7 +172,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
                 if (!player.isOnline()) continue; // Player disconnected in the meantime while refreshing in another thread
                 if (placeholder.hasValueChanged(player, playerResult.getValue(), true)) {
                     placeholder.updateParents(player);
-                    for (RefreshableFeature f : placeholder.getUsedByFeatures()) {
+                    for (RefreshableFeature f : placeholder.getReference().getUsedByFeatures()) {
                         update.computeIfAbsent(f, c -> new HashSet<>()).add(player);
                     }
                     if (placeholder.getIdentifier().equals(TabConstants.Placeholder.VANISHED)) {
@@ -191,7 +192,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
         for (Entry<ServerPlaceholderImpl, String> entry : results.entrySet()) {
             ServerPlaceholderImpl placeholder = entry.getKey();
             if (placeholder.hasValueChanged(entry.getValue())) {
-                set.addAll(placeholder.getUsedByFeatures());
+                set.addAll(placeholder.getReference().getUsedByFeatures());
                 for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
                     placeholder.updateParents(all);
                 }
@@ -225,7 +226,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
             existing.setHandle((TabPlaceholder) placeholder);
             for (TabPlayer p : TAB.getInstance().getOnlinePlayers()) {
                 if (!p.isLoaded()) continue;
-                for (RefreshableFeature f : ((TabPlaceholder)placeholder).getUsedByFeatures()) {
+                for (RefreshableFeature f : existing.getUsedByFeatures()) {
                     TimedCaughtTask task = new TimedCaughtTask(cpu, () -> f.refresh(p, true), f.getFeatureName(), f.getRefreshDisplayName());
                     if (f instanceof CustomThreaded) {
                         ((CustomThreaded) f).getCustomThread().execute(task);
@@ -234,10 +235,12 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
                     }
                 }
             }
+            ((TabPlaceholder) placeholder).setReference(existing);
             return existing;
         } else {
             PlaceholderReference reference = new PlaceholderReference(placeholder.getIdentifier(), (TabPlaceholder) placeholder);
             registeredPlaceholders.put(placeholder.getIdentifier(), reference);
+            ((TabPlaceholder) placeholder).setReference(reference);
             return reference;
         }
     }
@@ -257,7 +260,8 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
     }
 
     /**
-     * Detects placeholders in text using %% pattern and returns list of all detected identifiers
+     * Detects placeholders in text using %% pattern and platform-specific syntax,
+     * returning list of all detected identifiers
      *
      * @param   text
      *          text to detect placeholders in
@@ -265,6 +269,48 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
      */
     @NotNull
     public static List<String> detectPlaceholders(@NonNull String text) {
+        List<String> detectedPlaceholders = new ArrayList<>(detectPercentPlaceholders(text));
+        detectedPlaceholders.addAll(TAB.getInstance().getPlatform().detectAdditionalPlaceholders(text));
+
+        // The two detection methods return placeholders in their own local order,
+        // but merging them by appending breaks the order as they appear in the
+        // original text. Reorder by iterating through the string and finding
+        // placeholders in the actual order they appear.
+        List<String> orderedPlaceholders = new ArrayList<>();
+        String remaining = text;
+
+        while (!detectedPlaceholders.isEmpty()) {
+            // Find which placeholder appears first in the remaining text
+            String nextPlaceholder = null;
+            int nextIndex = Integer.MAX_VALUE;
+
+            for (String placeholder : detectedPlaceholders) {
+                int idx = remaining.indexOf(placeholder);
+                if (idx != -1 && idx < nextIndex) {
+                    nextIndex = idx;
+                    nextPlaceholder = placeholder;
+                }
+            }
+
+            // If no more placeholders found, add remaining ones
+            if (nextPlaceholder == null) {
+                orderedPlaceholders.addAll(detectedPlaceholders);
+                break;
+            }
+
+            // Add the found placeholder and remove it from further consideration
+            orderedPlaceholders.add(nextPlaceholder);
+            detectedPlaceholders.remove(nextPlaceholder);
+
+            // Move past this occurrence to find next placeholders in order
+            remaining = remaining.substring(nextIndex + nextPlaceholder.length());
+        }
+
+        return orderedPlaceholders;
+    }
+
+    @NotNull
+    private static List<String> detectPercentPlaceholders(@NonNull String text) {
         if (!text.contains("%")) return Collections.emptyList();
         if (text.charAt(0) == '%' && text.charAt(text.length()-1) == '%') {
             int count = 0;
@@ -293,7 +339,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
      *          Feature using the placeholder
      */
     public synchronized void addUsedPlaceholder(@NonNull String identifier, @NonNull RefreshableFeature feature) {
-        if (getPlaceholder(identifier).addUsedFeature(feature)) {
+        if (getPlaceholder(identifier).getReference().addUsedFeature(feature)) {
             recalculateUsedPlaceholders();
             TabPlaceholder p = getPlaceholder(identifier);
             for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
@@ -311,7 +357,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
      *          Feature using the placeholder
      */
     public synchronized void addUsedPlaceholder(@NonNull TabPlaceholder placeholder, @NonNull RefreshableFeature feature) {
-        if (placeholder.addUsedFeature(feature)) {
+        if (placeholder.getReference().addUsedFeature(feature)) {
             recalculateUsedPlaceholders();
             for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
                 all.expansionData.setPlaceholderValue(placeholder.getIdentifier(), placeholder.getLastValueSafe(all));
@@ -323,7 +369,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
      * Updates array of used placeholders.
      */
     private void recalculateUsedPlaceholders() {
-        usedPlaceholders = registeredPlaceholders.values().stream().filter(p -> !p.getHandle().getUsedByFeatures().isEmpty()).toArray(PlaceholderReference[]::new);
+        usedPlaceholders = registeredPlaceholders.values().stream().filter(p -> !p.getUsedByFeatures().isEmpty()).toArray(PlaceholderReference[]::new);
     }
 
     /**
@@ -345,7 +391,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
     public void onJoin(@NotNull TabPlayer connectedPlayer) {
         for (PlaceholderReference p : usedPlaceholders) {
             if (p.getHandle() instanceof ServerPlaceholderImpl) { // server placeholders don't update on join
-                connectedPlayer.expansionData.setPlaceholderValue(p.getIdentifier(), ((ServerPlaceholderImpl) p.getHandle()).getLastValue());
+                connectedPlayer.expansionData.setPlaceholderValue(p.getIdentifier(), p.getHandle().getLastValue(null));
             }
         }
         // Initialize to avoid onVanishStatusChange being called in the loop after joining because previous value was null
@@ -449,6 +495,8 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
     public void registerServerPlaceholder(@NonNull Pattern identifier, int refresh, @NonNull Function<Matcher, Supplier<String>> function) {
         ensureActive();
         registeredDynamicPlaceholders.put(identifier, id -> groups -> new ServerPlaceholderImpl(id, refresh, function.apply(groups)));
+        replaceMatchingPlaceholders(identifier,
+                (id, groups) -> new ServerPlaceholderImpl(id, refresh, function.apply(groups)));
     }
 
     @Override
@@ -456,6 +504,8 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
                                           @NonNull Function<Matcher, Function<me.neznamy.tab.api.TabPlayer, String>> function) {
         ensureActive();
         registeredDynamicPlaceholders.put(identifier, id -> groups -> new PlayerPlaceholderImpl(id, refresh, function.apply(groups)));
+        replaceMatchingPlaceholders(identifier,
+                (id, groups) -> new PlayerPlaceholderImpl(id, refresh, function.apply(groups)));
     }
 
     @Override
@@ -463,6 +513,18 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
                                               @NonNull Function<Matcher, BiFunction<me.neznamy.tab.api.TabPlayer, me.neznamy.tab.api.TabPlayer, String>> function) {
         ensureActive();
         registeredDynamicPlaceholders.put(identifier, id -> groups -> new RelationalPlaceholderImpl(id, refresh, function.apply(groups)));
+        replaceMatchingPlaceholders(identifier,
+                (id, groups) -> new RelationalPlaceholderImpl(id, refresh, function.apply(groups)));
+    }
+
+    private void replaceMatchingPlaceholders(@NotNull Pattern identifier,
+                                             @NotNull BiFunction<String, Matcher, ? extends Placeholder> factory) {
+        for (Entry<String, PlaceholderReference> entry : new ArrayList<>(registeredPlaceholders.entrySet())) {
+            Matcher matcher = identifier.matcher(entry.getKey());
+            if (!matcher.matches()) continue;
+            bridgePlaceholders.remove(entry.getKey());
+            registerPlaceholder(factory.apply(entry.getKey(), matcher));
+        }
     }
 
     @NotNull
@@ -481,8 +543,8 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
 
     @NotNull
     public synchronized PlaceholderReference getPlaceholderReference(@NonNull String identifier) {
-        if (identifier.charAt(0) != '%' || identifier.charAt(identifier.length() - 1) != '%') {
-            throw new IllegalArgumentException("Placeholder identifier must start and end with % (attempted to use \"" + identifier + "\")");
+        if (!PlaceholderIdentifier.isValid(identifier)) {
+            throw new IllegalArgumentException("Placeholder identifier must start and end with % or <> (attempted to use \"" + identifier + "\")");
         }
         // Check if placeholder is already registered
         PlaceholderReference reference = registeredPlaceholders.get(identifier);
@@ -533,16 +595,6 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
     public Object dump(@NotNull TabPlayer player) {
         Map<String, Object> map = new LinkedHashMap<>();
 
-        // Placeholder-related config sections
-        map.put("configuration", new LinkedHashMap<String, Object>() {{
-            put("placeholders", TAB.getInstance().getConfiguration().getConfig().getPlaceholders().getSection().getMap());
-            put("placeholder-output-replacements", TAB.getInstance().getConfiguration().getConfig().getReplacements().getSection().getMap());
-            put("placeholder-refresh-intervals", TAB.getInstance().getConfiguration().getConfig().getRefresh().getSection().getMap());
-            put("conditions", TAB.getInstance().getConfiguration().getConfig().getConditions().getSection().getMap());
-            put("animations", TAB.getInstance().getConfiguration().getAnimations().getAnimations().getSection().getMap());
-        }});
-
-        // Placeholder values
         List<List<String>> serverPlaceholders = new ArrayList<>();
         List<List<String>> playerPlaceholders = new ArrayList<>();
         Map<TabPlayer, List<List<String>>> relationalPlaceholders = new HashMap<>();
@@ -550,7 +602,7 @@ public class PlaceholderManagerImpl extends RefreshableFeature implements Placeh
             TabPlaceholder p = reference.getHandle();
             if (p.getIdentifier().contains("AnonymousCondition")) continue; // These are ugly, don't show them
             if (p instanceof ServerPlaceholderImpl) {
-                serverPlaceholders.add(Arrays.asList(p.getIdentifier(), String.valueOf(reference.getRefresh()), ((ServerPlaceholderImpl) p).getLastValue()));
+                serverPlaceholders.add(Arrays.asList(p.getIdentifier(), String.valueOf(reference.getRefresh()), p.getLastValue(null)));
             } else if (p instanceof PlayerPlaceholderImpl) {
                 playerPlaceholders.add(Arrays.asList(p.getIdentifier(), String.valueOf(reference.getRefresh()), p.getLastValueSafe(player)));
             } else if (p instanceof RelationalPlaceholderImpl) {

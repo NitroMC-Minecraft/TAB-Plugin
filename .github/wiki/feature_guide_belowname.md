@@ -7,8 +7,8 @@
 * [Compatibility with other plugins](#compatibility-with-other-plugins)
 * [Additional info](#additional-info)
   * [Additional note 1 - Copying nametag visibility rule](#additional-note-1---copying-nametag-visibility-rule)
-  * [Additional note 2 - Hidden on sneak on 1.8](#additional-note-2---hidden-on-sneak-on-18)
-  * [Additional note 3 - Visible on NPCs](#additional-note-3---visible-on-npcs)
+  * [Additional note 2 - [1.8.x] Hidden on sneak](#additional-note-2---18x-hidden-on-sneak)
+  * [Additional note 3 - [26.1.2-] Visible on NPCs](#additional-note-3---2612--visible-on-npcs)
     * [[26.1.x] Visible on all entities](#261x-visible-on-all-entities)
   * [Additional note 4 - Compatibility with modified clients](#additional-note-4---compatibility-with-modified-clients)
 * [Troubleshooting](#troubleshooting)
@@ -18,13 +18,14 @@
   * [Example 2 - Hiding `title` for 1.20.3+ players](#example-2---hiding-title-for-1203-players)
   * [Example 3 - Displaying health as 0-10 or in %](#example-3---displaying-health-as-0-10-or-in-)
   * [Example 4 - Health bar using hearts](#example-4---health-bar-using-hearts)
+  * [Example 5 - Conditionally hiding belowname for 26.2+ viewers](#example-5---conditionally-hiding-belowname-for-262-viewers)
 * [Tips & Tricks](#tips--tricks)
   * [Tip 1 - Heart symbol](#tip-1---heart-symbol)
 
 # About
-This features gives you control over Minecraft's scoreboard objective feature with BELOW_NAME slot.
-This line is displayed below the nametags of all player entities in game. It is not possible to explicitly disable this feature for NPCs; however, this goal can be achieved (see below for more info).
-It is only visible when within an 8-block range of the player (the range is hardcoded in the client and cannot be changed with a plugin).
+This features gives you control over Minecraft's scoreboard objective feature with BELOW_NAME slot.  
+On Minecraft 1.21.11 and below, it is visible on all player entities (including NPCs). On 26.1.x, it is visible on all player entities and all named entities (such as holograms), making this feature unusable. On 26.2 and above, it only appears on entities with a score assigned (the ideal implementation).  
+It is only visible when the target player is within a 10-block range of the viewer (the value is configurable since Minecraft 26.1).
 
 Example visual effect:  
 ![](https://images-ext-1.discordapp.net/external/YlGPCRDJVeZZI0TPWmVBKyHszxSkjatmclyqUThvTz8/https/image.prntscr.com/image/jcETUzVQQYqectQ2aI4iqQ.png)
@@ -54,10 +55,11 @@ All the options are explained in the following table.
 |---------------------|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | enabled             | true                  | Enables / Disables the feature                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | value               | %health%              | [1.20.2-] An integer from -2147483648 to 2147483647, doesn't support decimal values. The number is always white. Supports placeholders with player-specific output, such as player health. Only visible on 1.20.2 and lower. <br/> **Note**: Even if you only support 1.20.3+, you still need to configure this value to properly evaluate to a number, because the value is still sent to the client (just not displayed). You can set it to `0` for simplicity.                                                                              |
-| fancy-value         | &c%health%            | [1.20.3+] Any text, supports placeholders with per-player output. Only visible on 1.20.3+, where it completely replaces `value`.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| fancy-value-default | NPC                   | [1.20.3+] Default number format (`fancy-value`) for all player entities. `fancy-value` is displayed on every real player, therefore this default value will only appear on player entities which are not actual players, a.k.a. NPCs. Only visible on 1.20.3+.                                                                                                                                                                                                                                                                                 |
+| fancy-value         | &c%health%            | [1.20.3+] Any text, supports placeholders with per-player output. Only visible on 1.20.3+, where it completely replaces `value`. When evaluates to an empty string, the entire belowname is hidden for viewers using MC 26.2+ (when it was made possible).                                                                                                                                                                                                                                                                                     |
+| fancy-value-default | NPC                   | [1.20.3 - 26.1.2] Default number format (`fancy-value`) for all player entities. `fancy-value` is displayed on every real player, therefore this default value will only appear on player entities which are not actual players, a.k.a. NPCs. Only visible on since 1.20.3 (the function did not exist prior) until 26.1.2 (player entities without scores no longer display any belowname since 26.2).                                                                                                                                        |
 | title               | Health                | Shared label shown after the score for every player entity. Player sees the same text on everyone (= placeholders are parsed for the viewer). Use the `value`/`fancy-value` fields for per‑player data; use `title` only for static labels like `Health` or placeholders which are supposed to be parsed for the viewing player.                                                                                                                                                                                                               |
 | disable-condition   | %world%=disabledworld | A [condition](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Conditional-placeholders) (either name of a condition or a conditional expression) that must be met for disabling the feature for players. Set to empty for not disabling the feature ever. <br/> **Note**: Disabling the feature for a player means sending objective unregister packet to them, which results in player not seeing belowname on anyone anymore. It doesn't work the other way around - you cannot disable this feature on target players, only for viewers. |
+| view-distance       | 10                    | [26.1+] How close (in blocks) to a player one must be to see their belowname. This value is configurable since Minecraft 26.1, so this option won't work on older versions.                                                                                                                                                                                                                                                                                                                                                                    |
 
 # Limitations
 * [1.12.2-] Title length is limited to 32 characters (including color codes).
@@ -82,10 +84,10 @@ Note that if this was automatically generated by a plugin, it will probably be a
 The Minecraft feature is programmed to be affected by nametag visibility rule.
 This means that when the nametag is set to invisible, belowname will be invisible as well.
 
-## Additional note 2 - Hidden on sneak on 1.8
+## Additional note 2 - [1.8.x] Hidden on sneak
 Belowname is not visible on 1.8.x clients when player is sneaking. This is client-sided behavior and cannot be changed by the server.
 
-## Additional note 3 - Visible on NPCs
+## Additional note 3 - [26.1.2-] Visible on NPCs
 Belowname objective is automatically attached to all entities of player type with the default value of
 `0` (<1.20.3) or value configured as `fancy-value-default` (1.20.3+).
 This includes player NPCs.
@@ -113,7 +115,8 @@ In Minecraft version 26.1, Mojang "fixed" [MC-99647](https://bugs.mojang.com/bro
 **This is a client-sided bug. You will experience it on 26.1.x regardless of the server version**.  
 If your server is on 26.1.x, or you support players with this version through ViaVersion, this might be a dealbreaker for you. If that's the case, either disable this feature entirely, or set
 ```
-disable-condition: "%player-version-id%=775"
+belowname-objective:
+  disable-condition: "%player-version-id%=775"
 ```
 which will make 26.1.x players not see this feature on anyone (remember: disabling this feature disables it for the viewer, not target players).  
 **This bug was fixed in Minecraft version 26.2.**
@@ -240,3 +243,23 @@ belowname-objective:
 ```
 > [!IMPORTANT]
 > Make sure your config is [saved in UTF-8 encoding](https://github.com/NEZNAMY/TAB/wiki/How-to-save-the-config-in-UTF8-encoding) to properly read the heart symbol.
+
+## Example 5 - Conditionally hiding belowname for 26.2+ viewers
+Since Minecraft 26.2, belowname only appears on entities with a score. This can be used to disable the belowname on players with a condition. We are trying to achieve a condition like this: "If something, hide belowname for 26.2+ viewers".  
+TAB is made to reset score (= hide belowname) of target players for 26.2+ viewers (<26.2 viewers are not affected, resetting scores for them would result in `fancy-value-default` to be shown, which is undesirable) if `fancy-value` evaluated to an empty string. Therefore, we will need to make a [relational condition](https://github.com/NEZNAMY/TAB/wiki/Feature-guide:-Conditional-placeholders#relational-conditions) that checks the viewer's version and returns empty string if some condition is met.  
+Here is an example of hiding it if target player has less than 10 health (5 hearts):
+```
+conditions:
+  belowname-health:
+    conditions:
+      - "%viewer:player-version-id%>=776"  # 26.2 uses 776, check for viewer's version, not target player's
+      - "%health%<10"  # This should check target player's health
+    type: AND
+    true: ""  # Viewer is on 26.2+ and target has less than 10 health, return empty string to hide it
+    false: "%health%"  # Display health as normal
+```
+Then, use this condition as a relational condition (because it checks both viewer and target players):
+```
+belowname-objective:
+  fancy-value: "%rel_condition:belowname-health%"
+```

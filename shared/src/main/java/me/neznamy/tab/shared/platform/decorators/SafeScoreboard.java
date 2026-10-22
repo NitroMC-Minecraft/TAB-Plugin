@@ -49,6 +49,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
     /** Registered teams */
     private final Map<String, Team> teams = new ConcurrentHashMap<>();
 
+    /** Teams indexed by entries */
+    private final Map<String, Team> teamsByEntries = new ConcurrentHashMap<>();
+
     @Override
     public synchronized void registerObjective(@NonNull String objectiveName, @NonNull TabComponent title,
                                         @NonNull HealthDisplay display, @Nullable TabComponent numberFormat) {
@@ -143,6 +146,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         }
         Team team = new Team(createTeam(name), name, prefix, suffix, visibility, collision, players, options, color);
         teams.put(name, team);
+        for (String entry : players) {
+            teamsByEntries.put(entry, team);
+        }
         if (frozen) return;
         registerTeam(team);
     }
@@ -153,6 +159,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         if (team == null) {
             error("Tried to unregister non-existing team %s for player ", teamName);
             return;
+        }
+        for (String entry : team.getPlayers()) {
+            teamsByEntries.remove(entry, team);
         }
         if (frozen) return;
         unregisterTeam(team);
@@ -225,6 +234,49 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         }
     }
 
+    @Override
+    @NotNull
+    public Map<String, Object> dump() {
+        // Objectives
+        Map<String, Object> objectives = new LinkedHashMap<>();
+        for (Objective objective : this.objectives.values()) {
+            Map<String, Object> objectiveMap = new LinkedHashMap<>();
+            objectiveMap.put("displaySlot", objective.getDisplaySlot() == null ? null : objective.getDisplaySlot().name());
+            objectiveMap.put("title", objective.getTitle().toString());
+            objectiveMap.put("healthDisplay", objective.getHealthDisplay().name());
+            objectiveMap.put("numberFormat", objective.getNumberFormat() == null ? null : objective.getNumberFormat().toString());
+            Map<String, Object> scores = new LinkedHashMap<>();
+            for (Score score : objective.getScores().values()) {
+                Map<String, Object> scoreMap = new LinkedHashMap<>();
+                scoreMap.put("value", score.getValue());
+                scoreMap.put("displayName", score.getDisplayName() == null ? null : score.getDisplayName().toString());
+                scoreMap.put("numberFormat", score.getNumberFormat() == null ? null : score.getNumberFormat().toString());
+                scores.put(score.getHolder(), scoreMap);
+            }
+            objectiveMap.put("scores", scores);
+            objectives.put(objective.getName(), objectiveMap);
+        }
+
+        // Teams
+        Map<String, Object> teams = new LinkedHashMap<>();
+        for (Team team : this.teams.values()) {
+            Map<String, Object> teamMap = new LinkedHashMap<>();
+            teamMap.put("prefix", team.getPrefix().toString());
+            teamMap.put("suffix", team.getSuffix().toString());
+            teamMap.put("color", team.getColor().name());
+            teamMap.put("visibility", team.getVisibility().name());
+            teamMap.put("collision", team.getCollision().name());
+            teamMap.put("options", team.getOptions());
+            teamMap.put("players", team.getPlayers());
+            teams.put(team.getName(), teamMap);
+        }
+
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("objectives", objectives);
+        map.put("teams", teams);
+        return map;
+    }
+
     /**
      * Prints a debug message if attempted to perform an invalid operation.
      *
@@ -281,14 +333,14 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
      *          Team name in the packet
      * @param   players
      *          Players in the packet
-     * @return  Modified collection of players
+     * @return  Modified list of players
      */
     @NotNull
-    public Collection<String> onTeamPacket(int action, @NonNull String teamName, @NonNull Collection<String> players) {
-        Collection<String> newList = new ArrayList<>();
+    public List<String> onTeamPacket(int action, @NonNull String teamName, @NonNull Collection<String> players) {
+        List<String> newList = new ArrayList<>();
         if (action == TeamAction.CREATE || action == TeamAction.ADD_PLAYER) {
             for (String entry : players) {
-                Team expectedTeam = getExpectedTeam(entry);
+                Team expectedTeam = teamsByEntries.get(entry);
                 if (expectedTeam == null) {
                     blockedTeamAdds.remove(entry);
                     allowedTeamAdds.put(entry, teamName);
@@ -307,7 +359,7 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         if (action == TeamAction.REMOVE_PLAYER) {
             // TAB does not send remove player, making checks easier
             for (String entry : players) {
-                Team expectedTeam = getExpectedTeam(entry);
+                Team expectedTeam = teamsByEntries.get(entry);
                 if (expectedTeam != null) {
                     allowedTeamAdds.remove(entry);
                     blockedTeamAdds.remove(entry);
@@ -326,14 +378,6 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
             blockedTeamAdds.entrySet().removeIf(entry -> entry.getValue().equals(teamName));
         }
         return newList;
-    }
-
-    @Nullable
-    private Team getExpectedTeam(@NotNull String player) {
-        for (Team team : teams.values()) {
-            if (team.getPlayers().contains(player)) return team;
-        }
-        return null;
     }
 
     /**

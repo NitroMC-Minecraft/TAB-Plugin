@@ -8,6 +8,7 @@ import me.neznamy.tab.shared.chat.TabTextColor;
 import me.neznamy.tab.shared.chat.component.TabComponent;
 import me.neznamy.tab.shared.chat.component.TabTextComponent;
 import me.neznamy.tab.shared.platform.TabPlayer;
+import me.neznamy.tab.shared.util.cache.StringToComponentCache;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,10 +53,6 @@ public class ParseCommand extends SubCommand {
             }
         }
         String textToParse = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-        if (!textToParse.contains("%")) {
-            sendMessage(sender, "&cThe provided input (" + textToParse + ") does not contain any placeholders, therefore there's nothing to test.");
-            return;
-        }
         // Do it this way to avoid sending the "§" symbol to the console to try to color the text (does not work on Velocity)
         sendMessage(sender, new TabTextComponent("", Arrays.asList(
                 new TabTextComponent("Replacing placeholder ", TabTextColor.GOLD),
@@ -65,7 +62,13 @@ public class ParseCommand extends SubCommand {
         )));
         try {
             String replaced = new Property(null, null, target, textToParse, null).get();
-            TabComponent colored = TabComponent.fromColoredText("&3Colored output: &e\"&r" + replaced + "&e\"");
+            TabComponent colored = new TabTextComponent("", Arrays.asList(
+                    new TabTextComponent("Colored output: ", TabTextColor.DARK_AQUA),
+                    new TabTextComponent("\"", TabTextColor.YELLOW),
+                    StringToComponentCache.GLOBAL.convert(replaced),
+                    new TabTextComponent("\"", TabTextColor.YELLOW)
+
+            ));
             if (sender != null) {
                 sender.sendMessage(colored);
             } else {

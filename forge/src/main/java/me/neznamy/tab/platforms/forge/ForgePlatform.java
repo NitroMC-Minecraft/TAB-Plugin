@@ -263,6 +263,16 @@ public record ForgePlatform(MinecraftServer server) implements BackendPlatform {
     }
 
     @Override
+    public void runSyncGlobal(@NotNull Runnable task) {
+        server.execute(task);
+    }
+
+    @Override
+    public boolean hasLineOfSight(@NotNull TabPlayer viewer, @NotNull TabPlayer target) {
+        return ((ForgeTabPlayer) viewer).getPlayer().hasLineOfSight(((ForgeTabPlayer) target).getPlayer());
+    }
+
+    @Override
     @NotNull
     public Object dump() {
         Map<String, Object> map = new LinkedHashMap<>();
@@ -271,7 +281,7 @@ public record ForgePlatform(MinecraftServer server) implements BackendPlatform {
         map.put("server-version", SharedConstants.getCurrentVersion().name());
         map.put("tab-version", ProjectVariables.PLUGIN_VERSION);
         Map<String, Object> mods = new LinkedHashMap<>();
-        IModInfo[] modArray = ModList.get().getMods().toArray(new IModInfo[0]);
+        IModInfo[] modArray = ModList.getMods().toArray(new IModInfo[0]);
         Arrays.sort(modArray, Comparator.comparing(IModInfo::getModId, String.CASE_INSENSITIVE_ORDER));
         for (IModInfo mod : modArray) {
             mods.put(mod.getModId(), mod.getVersion().toString());

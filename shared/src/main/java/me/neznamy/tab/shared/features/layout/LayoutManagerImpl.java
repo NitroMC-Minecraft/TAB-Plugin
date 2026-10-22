@@ -28,6 +28,9 @@ import java.util.Map.Entry;
 public class LayoutManagerImpl extends RefreshableFeature implements LayoutManager, JoinListener, QuitListener, VanishListener, Loadable,
         UnLoadable, TabListClearListener, Dumpable {
 
+    /** public static for simple access */
+    public static final Set<UUID> UUIDS_SET = new HashSet<>();
+
     private final LayoutConfiguration configuration;
     private final LayoutSkinManager skinManager;
     private final UUID[] uuids = new UUID[80];
@@ -47,7 +50,9 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
         this.configuration = configuration;
         skinManager = new LayoutSkinManager(TAB.getInstance().getConfiguration().getSkinManager(), configuration.getDefaultSkin(), configuration.getDefaultSkinHashMap());
         for (int slot=1; slot<=80; slot++) {
-            uuids[slot-1] = new UUID(0, configuration.getDirection().translateSlot(slot));
+            UUID id = new UUID(0,  configuration.getDirection().translateSlot(slot));
+            uuids[slot-1] = id;
+            UUIDS_SET.add(id);
         }
         for (Entry<String, LayoutDefinition> entry : configuration.getLayouts().entrySet()) {
             LayoutPattern pattern = new LayoutPattern(this, entry.getValue());
@@ -72,17 +77,9 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
         p.layoutData.sortingString = p.sortingData.fullTeamName;
         sortedPlayers.put(p, p.sortingData.fullTeamName);
         LayoutPattern highest = getHighestLayout(p);
-        if (highest != null) {
-            sendLayout(p, highest);
-        }
+        sendLayout(p, highest);
         for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
             if (all.layoutData.currentLayout != null) all.layoutData.currentLayout.view.onJoin(p);
-        }
-
-        // Unformat original entries for players who can see a layout to avoid spaces due to unparsed placeholders and such
-        if (highest == null) return;
-        for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
-            p.getTabList().updateDisplayName(all, null);
         }
     }
 
@@ -107,17 +104,30 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
         LayoutPattern current = p.layoutData.currentLayout == null ? null : p.layoutData.currentLayout.view.getPattern();
         if (highest != current) {
             if (current != null) p.layoutData.currentLayout.view.destroy();
-            p.layoutData.currentLayout = null;
-            if (highest != null) {
-                sendLayout(p, highest);
-            }
+            sendLayout(p, highest);
         }
     }
 
-    private void sendLayout(@NotNull TabPlayer player, @NotNull LayoutPattern pattern) {
-        LayoutBase view = new FakeEntryLayout(this, pattern, player);
-        player.layoutData.currentLayout = new LayoutData(view);
-        view.send();
+    private void sendLayout(@NotNull TabPlayer player, @Nullable LayoutPattern pattern) {
+        if (pattern != null) {
+            LayoutBase view = new FakeEntryLayout(this, pattern, player);
+            player.layoutData.currentLayout = new LayoutData(view);
+            view.send();
+            if (playerList != null) {
+                // Unformat original entries for players who can see a layout to avoid spaces due to unparsed placeholders and such
+                for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
+                    player.getTabList().updateDisplayName(all, null);
+                }
+            }
+        } else {
+            player.layoutData.currentLayout = null;
+            if (playerList != null) {
+                // Reformat original entries for players without any layout
+                for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
+                    player.getTabList().updateDisplayName(all, playerList.getTabFormat(all, player));
+                }
+            }
+        }
     }
 
     @Override
@@ -127,6 +137,7 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
                 p.layoutData.currentLayout.view.destroy();
             }
         }
+        UUIDS_SET.clear();
     }
 
     @Override
@@ -204,11 +215,7 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
 
     @Override
     public void resetLayout(@NonNull me.neznamy.tab.api.TabPlayer player) {
-        ensureActive();
-        TabPlayer p = (TabPlayer) player;
-        p.ensureLoaded();
-        p.layoutData.forcedLayout = null;
-        refresh(p, false);
+        sendLayout(player, null);
     }
 
     @NotNull
