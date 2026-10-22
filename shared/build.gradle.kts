@@ -3,6 +3,8 @@ plugins {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.google.guava:guava:31.1-jre")
     api(projects.api)
     api("org.yaml:snakeyaml:2.0")
     api("com.github.NEZNAMY:yamlassist:1.0.8")
