@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -36,7 +37,6 @@ public class ThreadExecutor {
      * Shuts down the executor.
      */
     public void shutdown() {
-        long time = System.currentTimeMillis();
         executor.shutdown();
         try {
             if (!executor.awaitTermination(SHUTDOWN_TIMEOUT, TimeUnit.MILLISECONDS)) {
@@ -48,25 +48,26 @@ public class ThreadExecutor {
                 TAB.getInstance().getErrorManager().printError("Hard shutdown of thread " + threadName + " exceeded time limit of " + SHUTDOWN_TIMEOUT +
                         "ms. This may cause issues.", null);
             }
-        } catch (InterruptedException ignored) {
-            // Shutdown successful
-            TAB.getInstance().debug("Thread " + threadName + " shutdown in " + (System.currentTimeMillis() - time) + "ms");
+        } catch (InterruptedException e) {
+            // Stop outstanding work and preserve the caller's cancellation signal.
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
     public void execute(@NotNull Runnable task) {
         if (executor.isShutdown()) return;
-        executor.execute(new CaughtTask(task));
+        submit(() -> executor.execute(new CaughtTask(task)));
     }
 
     public void execute(@NotNull TimedCaughtTask task) {
         if (executor.isShutdown()) return;
-        executor.execute(task);
+        submit(() -> executor.execute(task));
     }
 
     public void executeLater(@NotNull TimedCaughtTask task, int delayMillis) {
         if (executor.isShutdown()) return;
-        executor.schedule(task, delayMillis, TimeUnit.MILLISECONDS);
+        submit(() -> executor.schedule(task, delayMillis, TimeUnit.MILLISECONDS));
     }
 
     /**
@@ -79,6 +80,18 @@ public class ThreadExecutor {
      */
     public void repeatTask(@NotNull TimedCaughtTask task, int intervalMilliseconds) {
         if (executor.isShutdown()) return;
-        executor.scheduleAtFixedRate(task, intervalMilliseconds, intervalMilliseconds, TimeUnit.MILLISECONDS);
+        submit(() -> executor.scheduleAtFixedRate(task, intervalMilliseconds, intervalMilliseconds, TimeUnit.MILLISECONDS));
+    }
+
+    /**
+     * Ignores rejection only when shutdown raced with task submission.
+     * Other submission failures must remain visible to the caller.
+     */
+    private void submit(@NotNull Runnable submission) {
+        try {
+            submission.run();
+        } catch (RejectedExecutionException e) {
+            if (!executor.isShutdown()) throw e;
+        }
     }
 }
